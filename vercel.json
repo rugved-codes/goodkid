@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/study.js": { "maxDuration": 30 }
+    "api/study.js": { "maxDuration": 60 }
   }
 }
 
