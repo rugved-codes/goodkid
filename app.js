@@ -11,6 +11,8 @@
   let flashcardIndex = 0;
   let flashcardRevealed = false;
   let toastTimer;
+  let smartMode = false, smartRetryQueue = [], smartRetryRound = false;
+  let smartFirstCorrect = 0, smartFirstTotal = 0, smartInitialMisses = [];
 
   function loadState() {
     try { return { sets: [], minutes: 0, weeklyDays: [], scores: [], sessions: [], ...JSON.parse(localStorage.getItem(storageKey) || '{}') }; }
@@ -53,9 +55,11 @@
   function renderLibrary() {
     const grid=$('#library-grid');
     if(!state.sets.length){grid.innerHTML='<div class="library-empty"><div style="font-size:22px;color:#91ad83">✳</div><b>Your next great study session starts here.</b><span>Upload a class PDF and Goodkid will pull out the topics worth your time.</span></div>';return;}
-    grid.innerHTML=state.sets.map(s=>`<article class="material-card" data-open="${escapeHtml(s.id)}"><div class="file-mark">▤</div><h3 title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</h3><p>${s.pageCount||1} pages · ${s.topics?.length||0} priority topics</p><div class="card-bottom"><span>${escapeHtml(s.subject||'Study set')}</span><span>Open map →</span></div></article>`).join('');
+    grid.innerHTML=state.sets.map(s=>`<article class="material-card" data-open="${escapeHtml(s.id)}"><button class="delete-set" data-delete="${escapeHtml(s.id)}" aria-label="Delete ${escapeHtml(s.name)}" title="Delete this study set">×</button><div class="file-mark">▤</div><h3 title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</h3><p>${s.pageCount||1} pages · ${s.topics?.length||0} priority topics</p><div class="card-bottom"><span>${escapeHtml(s.subject||'Study set')}</span><span>Open map →</span></div></article>`).join('');
     grid.querySelectorAll('[data-open]').forEach(c=>c.addEventListener('click',()=>openSet(c.dataset.open)));
+    grid.querySelectorAll('[data-delete]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation();deleteSet(b.dataset.delete);}));
   }
+  function deleteSet(id){const set=state.sets.find(s=>s.id===id);if(!set||!window.confirm(`Delete “${set.name}” and its saved study set?`))return;state.sets=state.sets.filter(s=>s.id!==id);save();renderLibrary();toast('Study set deleted.');}
   function switchView(view) {
     const home=view==='home';$('#home-view').classList.toggle('hidden',!home);$('#library-view').classList.toggle('hidden',home);$('#crumb-current').textContent=home?'Overview':'My materials';
     document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===view));if(!home)renderLibrary();
@@ -108,18 +112,20 @@
       if(!evidence.length)continue;
       evidence.forEach(e=>used.add(e.text));
       const name=term.charAt(0).toUpperCase()+term.slice(1);
-      topics.push({title:name,importance:Math.min(5,Math.max(2,Math.round(freq[term]/Math.max(1,candidates.length/10))+2)),why:`This idea appears across the notes. Start here, then check the supporting detail on page ${evidence[0].page}.`,sourcePages:[...new Set(evidence.map(e=>e.page))],teach:evidence.map(e=>e.text).join(' '),flashcards:evidence.map(e=>({front:`What should you remember about ${name}?`,back:e.text,sourcePage:e.page})),_evidence:evidence});
+      topics.push({title:name,importance:Math.min(5,Math.max(2,Math.round(freq[term]/Math.max(1,candidates.length/10))+2)),why:`This idea appears across the notes. Start here, then check the supporting detail on page ${evidence[0].page}.`,sourcePages:[...new Set(evidence.map(e=>e.page))],teach:evidence.map(e=>e.text).join(' '),coverage:evidence.map(e=>e.text),flashcards:evidence.map(e=>({front:`What should you remember about ${name}?`,back:e.text,sourcePage:e.page})),_evidence:evidence});
       if(topics.length>=8)break;
     }
     if(!topics.length&&ranked.length){const e=ranked[0];topics.push({title:'Main idea',importance:4,why:'This is one of the clearest complete ideas in the document.',sourcePages:[e.page],teach:e.text,flashcards:[{front:'What is the main idea?',back:e.text,sourcePage:e.page}],_evidence:[e]});}
     topics.sort((a,b)=>b.importance-a.importance||a.title.localeCompare(b.title));
     const evidencePool=ranked.slice(0,Math.max(topics.length,5));
     topics.forEach((topic,i)=>{
-      const target=topic._evidence[0];
-      const other=evidencePool.filter(e=>e.text!==target.text).map(e=>e.text.slice(0,230));
-      const opts=[target.text.slice(0,230),...other.slice(i,i+3)];while(opts.length<4)opts.push('This detail is not stated in the uploaded PDF.');
-      const shuffled=opts.slice(0,4).map((text,j)=>({text,correct:j===0})).sort(()=>Math.random()-.5);
-      topic.questions=[{prompt:`Which statement best explains ${topic.title}, according to your PDF?`,options:shuffled.map(x=>x.text),correct:shuffled.findIndex(x=>x.correct),explanation:`The notes say: “${target.text}” Review page ${target.page} for the original context.`,sourcePage:target.page}];
+      topic.coverage=topic._evidence.map(e=>e.text);
+      topic.questions=topic._evidence.map((target,index)=>{
+        const other=evidencePool.filter(e=>e.text!==target.text).map(e=>e.text.slice(0,230));
+        const opts=[target.text.slice(0,230),...other.slice(i+index,i+index+3)];while(opts.length<4)opts.push('This detail is not stated in the uploaded PDF.');
+        const shuffled=opts.slice(0,4).map((text,j)=>({text,correct:j===0})).sort(()=>Math.random()-.5);
+        return {coverageIndex:index,prompt:`Which statement best explains ${topic.title}, according to your PDF?`,options:shuffled.map(x=>x.text),correct:shuffled.findIndex(x=>x.correct),explanation:`The notes say: “${target.text}” Review page ${target.page} for the original context.`,sourcePage:target.page};
+      });
       delete topic._evidence;
     });
     const limited=topics.slice(0,6);
@@ -151,6 +157,9 @@
   }
   function normalizeSet(set){
     if(!Array.isArray(set.topics)||!set.topics.length)set.topics=[{title:set.subject||'Main idea',importance:4,why:'Review this study set.',sourcePages:[],teach:set.lesson||'',questions:set.questions||[],flashcards:[]}];
+    set.topics.forEach(topic=>{if(!Array.isArray(topic.coverage)||!topic.coverage.length)topic.coverage=[topic.teach||topic.why||'Review the key idea and its supporting detail.'];});
+    if(!set.guide)set.guide={summary:set.overview||'Review the key ideas pulled from this PDF.',focusStatus:'partial',focusNote:'This study guide is based on the material in your PDF.'};
+    if(!Array.isArray(set.visuals))set.visuals=[];
     set.topics.sort((a,b)=>(b.importance||0)-(a.importance||0));return set;
   }
   function openSet(id){const set=state.sets.find(s=>s.id===id);if(!set)return;normalizeSet(set);set.lastStudied=Date.now();showTopicMap(set);}
@@ -158,36 +167,53 @@
     activeSet=normalizeSet(set);
     const topics=set.topics.map((topic,index)=>`<article class="topic-card"><div class="topic-rank">${String(index+1).padStart(2,'0')}</div><div class="topic-main"><div class="topic-title-row"><h3>${escapeHtml(topic.title)}</h3><span class="priority-label">${index===0?'START HERE':index<3?'HIGH VALUE':'NEXT UP'}</span></div><p class="topic-why">${escapeHtml(topic.why||'A key idea from your PDF.')}</p><details class="topic-lesson"><summary>Teach me this idea</summary><p>${escapeHtml(topic.teach||'Review the supporting passage in your notes.')}</p></details><div class="topic-meta"><span class="importance-dots">${'●'.repeat(Math.min(5,Math.max(1,topic.importance||3)))}${'○'.repeat(5-Math.min(5,Math.max(1,topic.importance||3)))}</span><span>${topic.sourcePages?.length?`PDF page${topic.sourcePages.length===1?'':'s'} ${topic.sourcePages.slice(0,4).join(', ')}`:'From your PDF'}</span></div><div class="topic-actions"><button class="topic-study" data-study-topic="${index}">Practice this topic →</button>${topic.flashcards?.length?`<button class="topic-cards" data-cards-topic="${index}">Study flashcards</button>`:''}</div></div></article>`).join('');
     const modeLabel=set.source==='ai'?'AI topic map':'QUICK TOPIC SORT';
-    $('#modal-content').innerHTML=`<div class="study-map-head"><div class="map-badge">✳ &nbsp; ${modeLabel}</div><h2 id="study-title">Your ${escapeHtml(set.minutes||20)}-minute focus plan.</h2><p class="modal-subtitle">${escapeHtml(set.overview||'Start with the ideas most worth your time. Topics are ranked by importance, not page order.')}</p><div class="map-stats"><span>✳ &nbsp; ${set.topics.length} priority topics</span><span>▤ &nbsp; ${set.pageCount} PDF pages scanned</span><span>◷ &nbsp; ${set.minutes||20} min</span></div></div><div class="topic-list">${topics}</div><div class="map-footer">${set.note?`<p class="source-note">${escapeHtml(set.note)}</p>`:''}<button class="map-start" id="start-focus">Start my ${escapeHtml(set.minutes||20)}-minute focus session <span>→</span></button></div>`;
+    $('#modal-content').innerHTML=`<div class="study-map-head"><div class="map-badge">✳ &nbsp; ${modeLabel}</div><h2 id="study-title">Your ${escapeHtml(set.minutes||20)}-minute focus plan.</h2><p class="modal-subtitle">${escapeHtml(set.overview||'Start with the ideas most worth your time. Topics are ranked by importance, not page order.')}</p><div class="map-stats"><span>✳ &nbsp; ${set.topics.length} priority topics</span><span>▤ &nbsp; ${set.pageCount} PDF pages scanned</span><span>◷ &nbsp; ${set.minutes||20} min</span></div></div><nav class="study-tabs" aria-label="Study set sections"><button class="study-tab active" data-study-tab="learn">Learn</button><button class="study-tab" data-study-tab="notes">My notes</button><button class="study-tab" data-study-tab="guide">Study guide</button></nav><div class="study-panel" id="study-panel"><div class="topic-list">${topics}</div></div><div class="map-footer">${set.note?`<p class="source-note">${escapeHtml(set.note)}</p>`:''}<div class="study-start-actions"><button class="map-start quick-start" id="start-focus"><b>Quick study</b><small>Top topics · ${escapeHtml(set.minutes||20)} min</small></button><button class="map-start smart-start" id="smart-focus"><span><b>✦ Smart study</b><small>All ${set.topics.length} topics · repeat missed ideas</small></span><span>→</span></button></div></div>`;
     $('#study-modal').classList.remove('hidden');
-    $('#start-focus').addEventListener('click',()=>startSession(set));
+    $('#start-focus').addEventListener('click',()=>startSession(set));$('#smart-focus').addEventListener('click',()=>startSession(set,null,'smart'));
+    document.querySelectorAll('[data-study-tab]').forEach(b=>b.addEventListener('click',()=>{const tab=b.dataset.studyTab;document.querySelectorAll('[data-study-tab]').forEach(t=>t.classList.toggle('active',t===b));const panel=$('#study-panel');panel.innerHTML=tab==='learn'?'<div class="topic-list">'+topics+'</div>':tab==='notes'?renderNotes(set):renderGuide(set);panel.querySelectorAll('[data-study-topic]').forEach(btn=>btn.addEventListener('click',()=>startSession(set,Number(btn.dataset.studyTopic))));panel.querySelectorAll('[data-cards-topic]').forEach(btn=>btn.addEventListener('click',()=>startFlashcards(set.topics[Number(btn.dataset.cardsTopic)])));}));
     $('#modal-content').querySelectorAll('[data-study-topic]').forEach(b=>b.addEventListener('click',()=>startSession(set,Number(b.dataset.studyTopic))));
     $('#modal-content').querySelectorAll('[data-cards-topic]').forEach(b=>b.addEventListener('click',()=>startFlashcards(set.topics[Number(b.dataset.cardsTopic)])));
   }
-  function startSession(set,onlyIndex=null){
+  function renderNotes(set){
+    return `<section class="notes-intro"><span class="section-kicker">MADE FROM YOUR PDF</span><h3>Your quick notes</h3><p>Short, teachable notes for the ideas most worth remembering.</p></section><div class="generated-notes">${set.topics.map((topic,index)=>`<article class="note-card"><div class="note-card-head"><span class="topic-rank">${String(index+1).padStart(2,'0')}</span><div><h4>${escapeHtml(topic.title)}</h4><small>${topic.sourcePages?.length?`PDF page${topic.sourcePages.length===1?'':'s'} ${topic.sourcePages.slice(0,4).join(', ')}`:'From your PDF'}</small></div></div><p>${escapeHtml(topic.teach||topic.why||'Review this idea in the original notes.')}</p><b>Remember these</b><ul>${(topic.coverage||[]).map(point=>`<li>${escapeHtml(point)}</li>`).join('')}</ul></article>`).join('')}</div>`;
+  }
+  function renderGuide(set){
+    const status=set.guide?.focusStatus||'partial',statusLabel=status==='covered'?'In your notes':status==='not-found'?'Not found in this PDF':'Partly covered';
+    const visuals=set.visuals?.length?set.visuals:[{title:'Your topic map',type:'map',labels:set.topics.slice(0,5).map(topic=>topic.title),caption:'The key topics identified across your PDF.',sourcePages:[]}];
+    return `<section class="guide-summary"><span class="section-kicker">YOUR PDF, MADE CLEAR</span><h3>Here’s what you’re studying</h3><p>${escapeHtml(set.guide?.summary||set.overview||'A guide to the key ideas in this PDF.')}</p><div class="focus-coverage focus-${escapeHtml(status)}"><b>${escapeHtml(set.subject||'Study focus')} · ${statusLabel}</b><span>${escapeHtml(set.guide?.focusNote||'Use the topics below to see exactly what these notes cover.')}</span></div></section><div class="guide-columns"><section class="guide-topics"><h4>Covered in your PDF</h4>${set.topics.map((topic,index)=>`<div class="guide-topic"><span>${index<3?'✦':'○'}</span><div><b>${escapeHtml(topic.title)}</b><small>${escapeHtml(topic.coverage?.length||1)} core ideas · ${topic.sourcePages?.length?`pages ${topic.sourcePages.slice(0,3).join(', ')}`:'source linked'}</small></div><em>${index<3?'High priority':'Review'}</em></div>`).join('')}</section><section class="visuals-list"><h4>Picture it</h4>${visuals.map(renderVisual).join('')}</section></div><p class="guide-note">This guide reflects the selectable text in this PDF. Check your teacher’s test outline too, especially for anything not in these notes.</p>`;
+  }
+  function renderVisual(visual){
+    const labels=(visual.labels||[]).slice(0,5),type=visual.type||'map';
+    const items=labels.map((label,index)=>`<div class="visual-step"><span>${type==='flow'?String(index+1).padStart(2,'0'):type==='compare'?['A','B','A','B','•'][index]:'✦'}</span><b>${escapeHtml(label)}</b></div>`).join(type==='flow'?'<span class="visual-arrow" aria-hidden="true">→</span>':'');
+    return `<article class="visual-card"><h5>${escapeHtml(visual.title||'A visual from your notes')}</h5><div class="visual-map ${escapeHtml(type)}">${items}</div><p>${escapeHtml(visual.caption||'Key ideas from the uploaded PDF.')}</p>${visual.sourcePages?.length?`<small>PDF pages ${visual.sourcePages.join(', ')}</small>`:''}</article>`;
+  }
+  function startSession(set,onlyIndex=null,mode='quick'){
     activeSet=set;sessionStartedAt=Date.now();
+    smartMode=mode==='smart';smartRetryQueue=[];smartRetryRound=false;smartFirstCorrect=0;smartFirstTotal=0;smartInitialMisses=[];
     const count=onlyIndex===null?(set.minutes<=10?3:set.minutes<=20?5:7):1;
-    const chosen=onlyIndex===null?set.topics.slice(0,count):[set.topics[onlyIndex]];
+    const chosen=onlyIndex===null?(smartMode?set.topics:set.topics.slice(0,count)):[set.topics[onlyIndex]];
     const queue=[];const max=Math.max(...chosen.map(t=>(t.questions||[]).length),0);
     for(let n=0;n<max;n++)chosen.forEach(topic=>(topic.questions||[])[n]&&queue.push({...topic.questions[n],topicTitle:topic.title,importance:topic.importance}));
     activeQuestions=queue.length?queue:chosen.map(t=>({prompt:`What is the most important idea about ${t.title}?`,options:[t.teach,'This idea does not appear in the uploaded PDF.','The notes give no information about it.','This is unrelated to the topic.'],correct:0,explanation:t.teach,topicTitle:t.title}));
     activeQuestion=0;answers=[];renderQuestion();
   }
   function renderQuestion(){
-    const q=activeQuestions[activeQuestion];if(!q){finishQuiz();return;}const chosen=answers[activeQuestion];
+    const q=activeQuestions[activeQuestion];if(!q){if(smartMode&&smartRetryQueue.length){activeQuestions=smartRetryQueue;smartRetryQueue=[];smartRetryRound=true;activeQuestion=0;answers=[];return renderQuestion();}finishQuiz();return;}const chosen=answers[activeQuestion];
     const options=q.options.map((option,i)=>{let cls='';if(chosen){if(i===q.correct)cls='correct';else if(i===chosen.index)cls='incorrect';}return `<button class="answer-option ${cls}" data-answer="${i}" ${chosen?'disabled':''}>${escapeHtml(option)}</button>`;}).join('');
     const feedback=chosen?`<div class="feedback-box ${chosen.correct?'good':'try-again'}"><strong>${chosen.correct?'That’s right.':'Not quite — here’s why.'}</strong><div class="answer-key"><b>Correct answer</b><span>${escapeHtml(q.options[q.correct])}</span></div><p>${escapeHtml(q.explanation||'Review the matching topic in your PDF and say the idea in your own words.')}</p>${q.sourcePage?` <span class="answer-source">From PDF page ${q.sourcePage}</span>`:''}</div>`:'';
-    $('#modal-content').innerHTML=`<div class="quiz-head"><div><div class="modal-kicker">${escapeHtml(q.topicTitle||'FOCUSED PRACTICE')}</div><h2 id="study-title">One idea at a time.</h2></div><button class="text-button" id="exit-session">Exit</button></div><div class="quiz-topline"><span class="quiz-progress-label">${activeQuestion+1} / ${activeQuestions.length}</span><div class="quiz-progress"><span style="width:${((activeQuestion+1)/activeQuestions.length)*100}%"></span></div><span class="quiz-progress-label">FOCUS</span></div><div class="quiz-card"><div class="question-tag">TRY FROM MEMORY</div><h3>${escapeHtml(q.prompt)}</h3><div class="answer-list">${options}</div>${feedback}<div class="quiz-actions"><button id="next-question" ${chosen?'':'disabled'}>${activeQuestion===activeQuestions.length-1?'See what to review':'Next idea →'}</button></div></div>`;
-    $('#modal-content').querySelectorAll('[data-answer]').forEach(b=>b.addEventListener('click',()=>{answers[activeQuestion]={index:Number(b.dataset.answer),correct:Number(b.dataset.answer)===q.correct,topicTitle:q.topicTitle};renderQuestion();}));
+    const roundLabel=smartMode?(smartRetryRound?'SMART STUDY · TRY MISSED IDEAS AGAIN':'SMART STUDY · ALL TOPICS'):'QUICK STUDY';
+    $('#modal-content').innerHTML=`<div class="quiz-head"><div><div class="modal-kicker">${escapeHtml(q.topicTitle||'FOCUSED PRACTICE')}</div><h2 id="study-title">${smartRetryRound?'You’re getting it.':'One idea at a time.'}</h2></div><button class="text-button" id="exit-session">Exit</button></div><div class="quiz-topline"><span class="quiz-progress-label">${roundLabel} · ${activeQuestion+1} / ${activeQuestions.length}</span><div class="quiz-progress"><span style="width:${((activeQuestion+1)/activeQuestions.length)*100}%"></span></div><span class="quiz-progress-label">${q.coverageIndex!==undefined?`CORE IDEA ${q.coverageIndex+1}`:'FOCUS'}</span></div><div class="quiz-card"><div class="question-tag">TRY FROM MEMORY</div><h3>${escapeHtml(q.prompt)}</h3><div class="answer-list">${options}</div>${feedback}${smartMode&&chosen&&!chosen.correct?'<p class="smart-retry-note">We’ll bring this idea back before you finish. You’ve got this.</p>':''}<div class="quiz-actions"><button id="next-question" ${chosen?'':'disabled'}>${activeQuestion===activeQuestions.length-1?(smartRetryQueue.length?'Keep going':'See your progress'):'Next idea →'}</button></div></div>`;
+    $('#modal-content').querySelectorAll('[data-answer]').forEach(b=>b.addEventListener('click',()=>{const isCorrect=Number(b.dataset.answer)===q.correct;answers[activeQuestion]={index:Number(b.dataset.answer),correct:isCorrect,topicTitle:q.topicTitle};if(smartMode){if(!smartRetryRound){smartFirstTotal++;if(isCorrect)smartFirstCorrect++;else smartInitialMisses.push(q);}if(!isCorrect)smartRetryQueue.push({...q,retryCount:(q.retryCount||0)+1});}renderQuestion();}));
     $('#next-question').addEventListener('click',()=>{if(answers[activeQuestion]){activeQuestion++;renderQuestion();}});$('#exit-session').addEventListener('click',()=>showTopicMap(setForActive()));
   }
   function setForActive(){return activeSet;}
   function finishQuiz(){
-    const correct=answers.filter(a=>a?.correct).length,total=activeQuestions.length,pct=Math.round(correct/total*100);
-    recordSession({kind:'quiz',correct,total,topics:[...new Set(activeQuestions.map(q=>q.topicTitle).filter(Boolean))]});
-    const misses=answers.map((a,i)=>({a,q:activeQuestions[i]})).filter(x=>!x.a?.correct);
+    const completedSmart=smartMode;const correct=completedSmart?smartFirstCorrect:answers.filter(a=>a?.correct).length,total=completedSmart?smartFirstTotal:activeQuestions.length,pct=Math.round(correct/Math.max(1,total)*100);
+    recordSession({kind:'quiz',correct,total,topics:completedSmart?activeSet.topics.map(t=>t.title):[...new Set(activeQuestions.map(q=>q.topicTitle).filter(Boolean))]});
+    const misses=completedSmart?smartInitialMisses.map(q=>({q})):answers.map((a,i)=>({a,q:activeQuestions[i]})).filter(x=>!x.a?.correct);
     const rows=misses.length?misses.map(x=>`<div class="review-item"><span>↗</span> <b>${escapeHtml(x.q.topicTitle)}</b><div class="review-answer">Correct answer: ${escapeHtml(x.q.options[x.q.correct])}</div><p>${escapeHtml(x.q.explanation||x.q.prompt)}</p></div>`).join(''):'<div class="review-item">You got every question. A short review tomorrow will help these ideas stick.</div>';
-    $('#modal-content').innerHTML=`<div class="complete-box"><div class="complete-icon">${pct>=70?'✦':'↗'}</div><div class="modal-kicker">FOCUS SESSION COMPLETE</div><h2>${pct>=70?'That’s real progress.':'You found what to work on next.'}</h2><div class="score-big">${correct} / ${total}</div><p>${pct>=70?'You recalled most of the high-value ideas. Come back later for a short spaced review.':'Spend a couple more minutes on the topics below, then give them another try.'}</p><div class="review-list"><b>${misses.length?'Review these high-value ideas':'Keep it fresh'}</b>${rows}</div><div class="complete-actions"><button class="secondary-btn" id="back-to-map">Topic map</button><button class="primary-btn" id="finish-done">Done</button></div></div>`;
+    $('#modal-content').innerHTML=`<div class="complete-box"><div class="complete-icon">${pct>=70?'✦':'↗'}</div><div class="modal-kicker">${completedSmart?'SMART STUDY COMPLETE · ALL CORE IDEAS COVERED':'FOCUS SESSION COMPLETE'}</div><h2>${completedSmart?'You made it through every topic.':pct>=70?'That’s real progress.':'You found what to work on next.'}</h2><div class="score-big">${correct} / ${total}</div><p>${completedSmart?`First try: ${correct} of ${total}. You reviewed ${misses.length} ${misses.length===1?'idea':'ideas'} again until you got them right.`:pct>=70?'You recalled most of the high-value ideas. Come back later for a short spaced review.':'Spend a couple more minutes on the topics below, then give them another try.'}</p><div class="review-list"><b>${misses.length?'Ideas you practiced again':'Keep it fresh'}</b>${rows}</div><div class="complete-actions"><button class="secondary-btn" id="back-to-map">Study set</button><button class="primary-btn" id="finish-done">Done</button></div></div>`;
+    smartMode=false;
     $('#back-to-map').addEventListener('click',()=>showTopicMap(activeSet));$('#finish-done').addEventListener('click',()=>{$('#study-modal').classList.add('hidden');switchView('home');});
   }
   function recordSession({kind,correct=0,total=0,topics=[]}){
