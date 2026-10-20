@@ -13,8 +13,8 @@
   let toastTimer;
 
   function loadState() {
-    try { return { sets: [], minutes: 0, weeklyDays: [], scores: [], ...JSON.parse(localStorage.getItem(storageKey) || '{}') }; }
-    catch { return { sets: [], minutes: 0, weeklyDays: [], scores: [] }; }
+    try { return { sets: [], minutes: 0, weeklyDays: [], scores: [], sessions: [], ...JSON.parse(localStorage.getItem(storageKey) || '{}') }; }
+    catch { return { sets: [], minutes: 0, weeklyDays: [], scores: [], sessions: [] }; }
   }
   function save() { localStorage.setItem(storageKey, JSON.stringify(state)); renderStats(); renderRecent(); }
   function escapeHtml(value = '') { return String(value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
@@ -22,16 +22,27 @@
   function dateKey(d = new Date()) { return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; }
   function dayLabel() { return new Intl.DateTimeFormat(undefined,{weekday:'long',month:'long',day:'numeric'}).format(new Date()); }
   function weekStart() { const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-(d.getDay()+6)%7);return d; }
+  function dateFromKey(value) { const [year,month,day]=String(value).split('-').map(Number);return new Date(year,month-1,day); }
+  function formatDuration(seconds) { return seconds<60?`${seconds}s`:`${Math.round(seconds/60)} min`; }
   function renderStats() {
-    $('#stat-minutes').innerHTML=`${state.minutes||0}<span> min</span>`;
+    const sessions=state.sessions||[];const totalSeconds=(Number(state.minutes)||0)*60+sessions.reduce((sum,session)=>sum+(Number(session.seconds)||0),0);
+    const totalMinutes=Math.floor(totalSeconds/60);$('#stat-minutes').innerHTML=`${totalMinutes===0&&totalSeconds>0?'<1':totalMinutes}<span> min</span>`;
     $('#stat-sets').innerHTML=`${state.sets.length}<span> ${state.sets.length===1?'set':'sets'}</span>`;
     $('#material-count').textContent=state.sets.length;$('#material-bubble').textContent=state.sets.length;
     const scores=state.scores||[];
-    if(scores.length){$('#stat-recall').innerHTML=`${Math.round(scores.reduce((a,b)=>a+b,0)/scores.length)}<span>%</span>`;$('#recall-trend').textContent=`Across ${scores.length} ${scores.length===1?'quiz':'quizzes'}`;}
-    const weekDays=new Set((state.weeklyDays||[]).filter(d=>new Date(d.replaceAll('-','/')).getTime()>=weekStart().getTime()));
+    if(scores.length){$('#stat-recall').innerHTML=`${Math.round(scores.reduce((a,b)=>a+b,0)/scores.length)}<span>%</span>`;$('#recall-trend').textContent=`Across ${scores.length} ${scores.length===1?'session':'sessions'}`;$('#recall-detail').textContent='Average score from your completed quizzes.';}
+    else {$('#stat-recall').innerHTML='—<span></span>';$('#recall-trend').textContent='Complete a focus session to start';$('#recall-detail').textContent='Your completed quiz sessions appear here.';}
+    const start=weekStart();const dates=Array.from({length:7},(_,i)=>{const d=new Date(start);d.setDate(d.getDate()+i);return d;});
+    const dayKeys=dates.map(dateKey);const daySeconds=Object.fromEntries(dayKeys.map(k=>[k,0]));
+    sessions.forEach(s=>{if(Object.hasOwn(daySeconds,s.day))daySeconds[s.day]+=Number(s.seconds)||0;});
+    const maxSeconds=Math.max(0,...Object.values(daySeconds));
+    $('#weekly-chart').innerHTML=dates.map(d=>{const key=dateKey(d),seconds=daySeconds[key],height=maxSeconds?Math.max(7,seconds/maxSeconds*100):4;const today=key===dateKey();return `<i class="${today?'today-bar':''}" style="height:${height}%" title="${d.toLocaleDateString(undefined,{weekday:'long'})}: ${formatDuration(seconds)}"></i>`;}).join('');
+    $('#chart-days').innerHTML=dates.map(d=>`<span class="${dateKey(d)===dateKey()?'today':''}">${new Intl.DateTimeFormat(undefined,{weekday:'narrow'}).format(d)}</span>`).join('');
+    const weekSessions=sessions.filter(s=>dayKeys.includes(s.day));$('#time-trend').textContent=weekSessions.length?`${weekSessions.length} ${weekSessions.length===1?'session':'sessions'} this week`:'Your weekly study time';
+    const weekDays=new Set([...(state.weeklyDays||[]),...sessions.map(s=>s.day)].filter(d=>{const parsed=dateFromKey(d);return !Number.isNaN(parsed.getTime())&&parsed>=start;}));
     $('#weekly-progress').textContent=`${Math.min(weekDays.size,5)} / 5 days`;$('.focus-progress span').style.width=`${Math.min(weekDays.size*20,100)}%`;
     $('#week-label').textContent=new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric'}).format(weekStart());
-    const days=new Set(state.weeklyDays||[]);let d=new Date(),streak=0;if(!days.has(dateKey(d)))d.setDate(d.getDate()-1);while(days.has(dateKey(d))){streak++;d.setDate(d.getDate()-1);}$('#streak-days').textContent=`${streak} day streak`;
+    const days=new Set([...(state.weeklyDays||[]),...sessions.map(s=>s.day)]);let d=new Date(),streak=0;if(!days.has(dateKey(d)))d.setDate(d.getDate()-1);while(days.has(dateKey(d))){streak++;d.setDate(d.getDate()-1);}$('#streak-days').textContent=`${streak} day streak`;
   }
   function renderRecent() {
     const recent=$('#recent-list');
@@ -172,15 +183,20 @@
   function setForActive(){return activeSet;}
   function finishQuiz(){
     const correct=answers.filter(a=>a?.correct).length,total=activeQuestions.length,pct=Math.round(correct/total*100);
-    state.scores.push(pct);state.minutes=(state.minutes||0)+Math.max(1,Math.round((Date.now()-sessionStartedAt)/60000));state.weeklyDays=[...new Set([...(state.weeklyDays||[]),dateKey()])];save();
+    recordSession({kind:'quiz',correct,total,topics:[...new Set(activeQuestions.map(q=>q.topicTitle).filter(Boolean))]});
     const misses=answers.map((a,i)=>({a,q:activeQuestions[i]})).filter(x=>!x.a?.correct);
     const rows=misses.length?misses.map(x=>`<div class="review-item"><span>↗</span> <b>${escapeHtml(x.q.topicTitle)}</b>: ${escapeHtml(x.q.explanation||x.q.prompt)}</div>`).join(''):'<div class="review-item">A quick review tomorrow will help these ideas stick.</div>';
     $('#modal-content').innerHTML=`<div class="complete-box"><div class="complete-icon">${pct>=70?'✦':'↗'}</div><div class="modal-kicker">FOCUS SESSION COMPLETE</div><h2>${pct>=70?'That’s real progress.':'You found what to work on next.'}</h2><div class="score-big">${correct} / ${total}</div><p>${pct>=70?'You recalled most of the high-value ideas. Come back later for a short spaced review.':'Spend a couple more minutes on the topics below, then give them another try.'}</p><div class="review-list"><b>${misses.length?'Review these high-value ideas':'Keep it fresh'}</b>${rows}</div><div class="complete-actions"><button class="secondary-btn" id="back-to-map">Topic map</button><button class="primary-btn" id="finish-done">Done</button></div></div>`;
     $('#back-to-map').addEventListener('click',()=>showTopicMap(activeSet));$('#finish-done').addEventListener('click',()=>{$('#study-modal').classList.add('hidden');switchView('home');});
   }
-  function startFlashcards(topic){flashcards=topic.flashcards||[];flashcardIndex=0;flashcardRevealed=false;renderFlashcard(topic);}
+  function recordSession({kind,correct=0,total=0,topics=[]}){
+    const seconds=Math.max(1,Math.round((Date.now()-sessionStartedAt)/1000));const day=dateKey();
+    state.sessions=state.sessions||[];state.sessions.push({id:crypto.randomUUID(),kind,day,seconds,correct,total,topics});
+    state.weeklyDays=[...new Set([...(state.weeklyDays||[]),day])];if(total>0)state.scores=[...(state.scores||[]),Math.round(correct/total*100)];save();
+  }
+  function startFlashcards(topic){flashcards=topic.flashcards||[];flashcardIndex=0;flashcardRevealed=false;sessionStartedAt=Date.now();renderFlashcard(topic);}
   function renderFlashcard(topic){
-    const card=flashcards[flashcardIndex];if(!card){showTopicMap(activeSet);return;}
+    const card=flashcards[flashcardIndex];if(!card){recordSession({kind:'flashcards',topics:[topic.title]});showTopicMap(activeSet);return;}
     $('#modal-content').innerHTML=`<div class="quiz-head"><div><div class="modal-kicker">${escapeHtml(topic.title)} · QUICK CARDS</div><h2 id="study-title">${flashcardIndex+1} of ${flashcards.length}</h2></div><button class="text-button" id="cards-back">Topic map</button></div><div class="flashcard" role="button" tabindex="0" id="flashcard"><div class="question-tag">${flashcardRevealed?'REMEMBER THIS':'TRY TO RECALL'}</div><p>${escapeHtml(flashcardRevealed?card.back:card.front)}</p>${card.sourcePage?`<small>PDF page ${card.sourcePage}</small>`:''}<span class="flash-hint">${flashcardRevealed?'Tap next when you’re ready':'Think first, then reveal'}</span></div><div class="quiz-actions"><button id="flip-card">${flashcardRevealed?(flashcardIndex===flashcards.length-1?'Back to topics':'Next card →'):'Show answer'}</button></div>`;
     $('#cards-back').addEventListener('click',()=>showTopicMap(activeSet));$('#flip-card').addEventListener('click',()=>{if(!flashcardRevealed)flashcardRevealed=true;else{flashcardIndex++;flashcardRevealed=false;}renderFlashcard(topic);});$('#flashcard').addEventListener('click',()=>{if(!flashcardRevealed){flashcardRevealed=true;renderFlashcard(topic);}});
   }
