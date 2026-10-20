@@ -128,10 +128,10 @@
     const sample=pageSamples(pages);const local=makeFallback(pages,fileName,focus,minutes);
     try{
       const response=await fetch('/api/study',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pages:sample,fileName,focus,minutes})});
-      if(!response.ok)return local;
-      const data=await response.json();if(!Array.isArray(data.topics)||!data.topics.length)return local;
+      if(!response.ok){local.note=response.status===503?'AI study generation is not enabled on this deployment. Confirm GEMINI_API_KEY is set for Production in Vercel, then redeploy.':'AI could not finish this study map. Check the Vercel function logs and confirm GEMINI_API_KEY is valid; Goodkid made a quick local topic sort instead.';return local;}
+      const data=await response.json();if(!Array.isArray(data.topics)||!data.topics.length){local.note='AI returned an incomplete study map, so Goodkid made a quick local topic sort instead. Check the Vercel function logs.';return local;}
       return {...local,...data,source:'ai'};
-    }catch{return local;}
+    }catch{local.note='Goodkid could not reach its AI study service. Check the Vercel deployment, then try uploading this PDF again. A quick local topic sort is ready in the meantime.';return local;}
   }
   function showProcessing(title,message){$('#modal-content').innerHTML=`<div class="processing"><div class="spinner"></div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p><div class="pdf-note">Goodkid reads your PDF and samples pages across the whole document.</div></div>`;$('#study-modal').classList.remove('hidden');}
   async function handleFile(file){
