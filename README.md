@@ -1,8 +1,8 @@
 # Goodkid
 
-Goodkid helps high school students spend less time rereading and more time remembering. Upload a class PDF, add an optional test focus and study-time limit, then get a prioritized topic map, concise teaching, page references, flashcards, and mixed recall questions.
+Goodkid helps high school students spend less time rereading and more time remembering. Upload a class PDF, add an optional test focus and study-time limit, then get a prioritized topic map, auto-generated notes, a visual study guide, flashcards, and practice questions with explanations.
 
-Topics are ranked by how central and well-supported they are in the uploaded PDF, whether they recur or are emphasized, and how well they match the student's stated test focus. Study sessions draw from the highest-priority topics rather than following document page order.
+Topics are ranked by how central and well-supported they are in the uploaded PDF, whether they recur or are emphasized, and how well they match the student's stated test focus. Smart Study checks every generated core learning point across the full study set and repeats missed questions until they are answered correctly. Quick Study provides a shorter high-priority review.
 
 ## Run locally
 
