@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f7f3" />
+    <meta name="description" content="Turn class notes into a study plan that sticks. Upload a PDF, learn the big ideas, and practice with Goodkid." />
+    <title>Goodkid — make it stick</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#home" aria-label="Goodkid home"><span class="brand-mark">g<span>+</span></span><span>goodkid</span></a>
+        <div class="side-label">YOUR SPACE</div>
+        <nav class="nav-links" aria-label="Main navigation">
+          <button class="nav-item active" data-view="home"><span class="nav-icon">◫</span> My study room</button>
+          <button class="nav-item" data-view="library"><span class="nav-icon">▤</span> My materials <span class="nav-count" id="material-count">0</span></button>
+        </nav>
+        <div class="side-label recent-label">RECENTLY STUDIED</div>
+        <div class="recent-list" id="recent-list"><div class="empty-recent">Your study sets will show up here.</div></div>
+        <div class="sidebar-bottom"><div class="focus-card"><div class="focus-spark">✦</div><div class="focus-title">Small steps add up.</div><div class="focus-copy">A little practice today makes test day feel easier.</div><div class="focus-progress"><span></span></div><div class="focus-foot"><span>YOUR WEEKLY GOAL</span><span id="weekly-progress">0 / 5 days</span></div></div><div class="profile-row"><div class="avatar">g</div><div><div class="profile-name">My study space</div><div class="profile-grade">Made for curious minds</div></div><span class="profile-dots">···</span></div></div>
+      </aside>
+      <main class="main-area">
+        <header class="topbar"><div class="crumb"><span>My study room</span><span class="crumb-slash">/</span><span id="crumb-current">Overview</span></div><div class="top-actions"><span class="today-label" id="today-label"></span><button class="help-button" aria-label="How Goodkid works" id="help-button">?</button><button class="top-avatar">g</button></div></header>
+        <div class="page-content" id="home-view">
+          <section class="welcome-row"><div><div class="eyebrow"><span class="eyebrow-dot"></span> YOUR LEARNING SPACE</div><h1>Hey, ready to <span>make it stick?</span></h1><p class="welcome-copy">Turn your class notes into a study plan that actually works.</p></div><div class="streak-chip"><span class="streak-icon">✳</span><span><strong id="streak-days">0 day streak</strong><small>Every session counts</small></span><span class="streak-spark">✦</span></div></section>
+          <section class="upload-card" id="upload-card"><div class="upload-copy"><div class="upload-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"/></svg></div><div><div class="upload-kicker">START WITH YOUR NOTES</div><h2>Bring your class material to life.</h2><p>Drop in a PDF and get a clear lesson, a smart quiz, and a plan for what to review.</p><div class="upload-meta"><span><i class="check-dot">✓</i> Built around your material</span><span><i class="check-dot">✓</i> Practice that adapts to you</span></div></div></div><label class="drop-zone" id="drop-zone" for="pdf-input"><div class="drop-icon">↑</div><strong>Drop a PDF to get started</strong><span>or <em>choose a file</em> from your device</span><small>PDF · up to 20 MB</small></label><input type="file" id="pdf-input" accept="application/pdf,.pdf" hidden /></section>
+          <div class="section-heading"><div><div class="section-kicker">YOUR MOMENTUM</div><h2>A little progress goes a long way.</h2></div><span class="week-pill">THIS WEEK <span id="week-label"></span></span></div>
+          <section class="stats-grid"><article class="stat-card"><div class="stat-top"><span class="stat-icon mint">◷</span><span class="stat-trend">↗ &nbsp; Keep going</span></div><div class="stat-value" id="stat-minutes">0<span> min</span></div><div class="stat-label">Time spent learning</div><div class="mini-bars" aria-label="Study time by day"><i style="height:25%"></i><i style="height:38%"></i><i style="height:32%"></i><i style="height:53%"></i><i style="height:45%"></i><i style="height:65%"></i><i class="today-bar" style="height:37%"></i></div><div class="chart-days"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div></article><article class="stat-card recall-card"><div class="stat-top"><span class="stat-icon lavender">✦</span><span class="stat-trend" id="recall-trend">Your first quiz awaits</span></div><div class="stat-value" id="stat-recall">—<span></span></div><div class="stat-label">Quiz accuracy</div><div class="recall-note"><span class="recall-ring">↗</span><span>Practice is how the brain builds stronger memories.</span></div></article><article class="stat-card materials-card"><div class="stat-top"><span class="stat-icon peach">▤</span><span class="material-bubble" id="material-bubble">0</span></div><div class="stat-value" id="stat-sets">0<span> sets</span></div><div class="stat-label">Ready when you are</div><div class="material-lower"><div class="material-stack"><i>✧</i><i>⌘</i><i>◈</i></div><span>Every subject has a first step.</span></div></article></section>
+          <section class="bottom-row"><div class="next-card"><div class="next-icon">✳</div><div><div class="next-kicker">YOUR NEXT STEP</div><h3>Make your first study set</h3><p>Upload a class PDF to turn reading into real practice.</p></div><button class="arrow-btn" id="upload-cta" aria-label="Upload a PDF">↗</button></div><div class="tip-card"><div class="tip-head"><span>THE GOODKID WAY</span><span class="tip-stars">✦ ✦ ✦</span></div><div class="tip-quote">“Try to remember it before you look it up.”</div><div class="tip-foot"><span class="tip-bulb">✧</span> That effort helps the memory last longer.</div></div></section>
+          <footer class="page-footer"><span>Made for your next <strong>“I’ve got this.”</strong></span><span>LEARN A LITTLE. REMEMBER A LOT. <b>✳</b></span></footer>
+        </div>
+        <div class="page-content hidden" id="library-view"><div class="library-head"><div><div class="eyebrow"><span class="eyebrow-dot"></span> YOUR MATERIALS</div><h1>Your study sets.</h1><p class="welcome-copy">Everything you’ve uploaded, ready for another round.</p></div><button class="primary-btn" id="library-upload">＋ Upload a PDF</button></div><div class="library-grid" id="library-grid"></div></div>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+    <div class="modal-backdrop hidden" id="study-modal"><section class="study-modal" role="dialog" aria-modal="true" aria-labelledby="study-title"><button class="modal-close" id="modal-close" aria-label="Close">×</button><div class="modal-content" id="modal-content"></div></section></div>
+    <div class="modal-backdrop hidden" id="help-modal"><section class="help-modal" role="dialog" aria-modal="true"><button class="modal-close" id="help-close" aria-label="Close">×</button><div class="help-badge">✳</div><div class="section-kicker">A BETTER WAY TO STUDY</div><h2>Learn it, then prove it.</h2><p>Goodkid turns your own class material into short lessons and practice. You’ll try to recall ideas, get a clear explanation when you miss one, and revisit the topics that need another look.</p><div class="help-steps"><div><b>01</b><span><strong>Bring your notes</strong><small>Upload a PDF from class.</small></span></div><div><b>02</b><span><strong>Get the big picture</strong><small>Start with a friendly, plain-language lesson.</small></span></div><div><b>03</b><span><strong>Practice & remember</strong><small>Quiz yourself, then review tricky ideas.</small></span></div></div><button class="primary-btn help-done" id="help-done">Got it</button></section></div>
+  </body>
+</html>
+
